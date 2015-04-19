@@ -17,11 +17,11 @@ class Simplifier(object):
                                 'jp', 'jpe', 'jnp', 'jpo', 'jl', 'jnge', 'jnl', 'jge', 'jle', \
                                 'jng', 'jnle', 'jg']
         self.condJmpsAddr = set([])
-        self.retn = ['retn', 'ret', 'retf']
+        self.retn = ['retn', 'ret', 'retf', 'hlt']
         self.callAddr = set([])
-        self.call = 'call'
+        self.call = ['call']
         self.callByte = 0xe8
-        self.jmp = 'jmp'
+        self.jmp = ['jmp']
         self.visitedAddr = set([])
         self.target = set([])
 
@@ -58,24 +58,27 @@ class Simplifier(object):
     def getCur(self, addr):
         "returns address, dissasembly, the mnemoic and byte"
         if self.checkAddr(addr):
-            print "GetCur: %s (%s )" % (addr,type(addr))
+            print "GetCur: %s (%s )" % (hex(addr),type(addr))
             seg = self.doc.getSegmentAtAddress(addr)
-            return self.doc.getCurrentAddress(), seg.getInstructionAtAddress(addr), seg.getInstructionAtAddress(addr), seg.readByte(addr)
+            return addr, seg.getInstructionAtAddress(addr), seg.getInstructionAtAddress(addr), seg.readByte(addr)
+        else:
+            print "GetCurr: Address %s is invalid!" % addr
+            return None,None,None,None
 
     def getNext(self, addr):
         "returns the next address and instructions"
         seg = self.doc.getSegmentAtAddress(addr)
         inst_len = seg.getInstructionAtAddress(addr).getInstructionLength()
         next_addr = addr+inst_len
-        print "Next addr: %s (%s) " % (next_addr,type(next_addr))
+        print "Next addr: %s (%s) " % (hex(next_addr),type(next_addr))
         return next_addr, seg.getInstructionAtAddress(next_addr), seg.getInstructionAtAddress(next_addr), seg.readByte(next_addr)
 
     def getJmpAddress(self, jmp_addr):
         "returns the address the JMP instruction jumps to"
         seg = self.doc.getSegmentAtAddress(jmp_addr)
         jmp_instr = seg.getInstructionAtAddress(jmp_addr)
-        target = jmp_instr.getRawArgument(0)
-        print "%s: %s --> %s (%s)" % (jmp_addr, jmp_instr.getInstructionString(),target,type(target))
+        target = jmp_instr.getRawArgument(0).strip(['[',']'])
+        print "%s: %s --> %s (%s)" % (hex(jmp_addr), jmp_instr.getInstructionString(),target,type(target))
         if target not in self.registers:
             return int(target,16)
         else:
@@ -83,7 +86,15 @@ class Simplifier(object):
 
     def getCallAddress(self, call_addr):
         "return the address the CALL instruction calls"
-        call_instr.getRawArgument(0)
+        seg = self.doc.getSegmentAtAddress(call_addr)
+        call_instr = seg.getInstructionAtAddress(call_addr)
+        target = call_instr.getRawArgument(0)
+        print "%s: %s --> %s (%s)" % (hex(call_addr), call_instr.getInstructionString(),target,type(target))
+        if target not in self.registers:
+            return int(target,16)
+        else:
+            return Segment.BAD_ADDRESS
+
 
     def printBuffer(self):
         'print the buffer that contains the instructions minus jmps'
@@ -91,6 +102,15 @@ class Simplifier(object):
         for l in self.buffer:
             print l
         print "======================="
+
+    def isJMP(self,instruction):
+        return instruction.getInstructionString() in self.jmp
+
+    def isJcc(self,instruction):
+        return instruction.getInstructionString() in self.condJmps
+
+    def isCall(self,instruction):
+        return instruction.getInstructionString() in self.call
 
     def simplify(self, addr, target = list([]) ):
         # check if valid addresss
@@ -104,7 +124,9 @@ class Simplifier(object):
                 self.checkAddr(current_addr)
                 if self.errorStatus != 'Good':
                     return
-                if current_mnem.isAnInconditionalJump(): #if unconditional jmp
+                print "Current Addr: %s instr: %s  byte: %s " % (hex(current_addr),current_inst.getInstructionString(), byte)
+
+                if self.isJMP(current_inst): #if unconditional jmp
                     print "Found a JMP @%s" % (hex(current_addr))
                     # uncomment if you want to see the jmp instruction in the output
                     #self.buffer.append(self.formatLine(current_addr))
@@ -113,17 +135,18 @@ class Simplifier(object):
                     current_addr, current_inst, current_mnem, byte = self.getCur(jmpAddr)
                     continue
                 # check for conditonal jmps, if so add to the target aka come back to list
-                elif current_mnem.isAConditionalJump():
+                elif self.isJcc(current_inst):
                     print "Found a Jcc @%s" % (hex(current_addr))
                     self.buffer.append(self.formatLine(current_addr))
                     jmpAddr = self.getJmpAddress(current_addr)
                     target.append(jmpAddr)
                 # if call, we will need the call address
-                elif current_mnem.getInstructionString() in self.call and byte == self.callByte:
+                elif self.isCall(current_inst):
                     print "Found a CALL @%s" % (hex(current_addr))
                     self.buffer.append(self.formatLine(current_addr))
                     target.append(self.getCallAddress(current_addr))
                 else:
+                    print "Nothing special: %s" % (current_inst.getInstructionString())
                     self.buffer.append(self.formatLine(current_addr))
 
                 if current_mnem.getInstructionString() in self.retn or current_addr in self.visitedAddr:
@@ -133,14 +156,17 @@ class Simplifier(object):
 
             self.buffer.append('__end: %s ' % hex(temp))
             self.buffer.append('')
+            print "Visiting Targets..."
             for revisit in target:
                 if revisit in self.visitedAddr:
                     continue
                 else:
                     self.simplify(revisit, target)
+            print "Done."
 
         return
 
 simp = Simplifier()
-simp.simplify(Document.getCurrentDocument().getCurrentAddress())
+doc = Document.getCurrentDocument();
+simp.simplify(doc.getCurrentAddress())
 simp.printBuffer()
