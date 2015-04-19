@@ -58,7 +58,7 @@ class Simplifier(object):
     def getCur(self, addr):
         "returns address, dissasembly, the mnemoic and byte"
         if self.checkAddr(addr):
-            print "GetCur: %s (%s )" % (hex(addr),type(addr))
+            print "GetCur: %s (%s )" % (hex(addr), self.getSegment(addr))
             seg = self.doc.getSegmentAtAddress(addr)
             return addr, seg.getInstructionAtAddress(addr), seg.getInstructionAtAddress(addr), seg.readByte(addr)
         else:
@@ -73,28 +73,21 @@ class Simplifier(object):
         print "Next addr: %s (%s) " % (hex(next_addr),type(next_addr))
         return next_addr, seg.getInstructionAtAddress(next_addr), seg.getInstructionAtAddress(next_addr), seg.readByte(next_addr)
 
-    def getJmpAddress(self, jmp_addr):
+    def getBranchAddress(self, jmp_addr):
         "returns the address the JMP instruction jumps to"
         seg = self.doc.getSegmentAtAddress(jmp_addr)
         jmp_instr = seg.getInstructionAtAddress(jmp_addr)
-        target = jmp_instr.getRawArgument(0).strip(['[',']'])
-        print "%s: %s --> %s (%s)" % (hex(jmp_addr), jmp_instr.getInstructionString(),target,type(target))
+        target = str(jmp_instr.getRawArgument(0)).strip("[]")
         if target not in self.registers:
-            return int(target,16)
+            target= int(target,16)
+            print "%s: %s --> %s (%s)" % (hex(jmp_addr), jmp_instr.getInstructionString(), hex(target), self.getSegment(target))
         else:
             return Segment.BAD_ADDRESS
 
-    def getCallAddress(self, call_addr):
-        "return the address the CALL instruction calls"
-        seg = self.doc.getSegmentAtAddress(call_addr)
-        call_instr = seg.getInstructionAtAddress(call_addr)
-        target = call_instr.getRawArgument(0)
-        print "%s: %s --> %s (%s)" % (hex(call_addr), call_instr.getInstructionString(),target,type(target))
-        if target not in self.registers:
-            return int(target,16)
-        else:
-            return Segment.BAD_ADDRESS
 
+    def getSegment(self,addr):
+        seg = self.doc.getSegmentAtAddress(addr)
+        return seg.getName()
 
     def printBuffer(self):
         'print the buffer that contains the instructions minus jmps'
@@ -130,7 +123,7 @@ class Simplifier(object):
                     print "Found a JMP @%s" % (hex(current_addr))
                     # uncomment if you want to see the jmp instruction in the output
                     #self.buffer.append(self.formatLine(current_addr))
-                    jmpAddr = self.getJmpAddress(current_addr)
+                    jmpAddr = self.getBranchAddress(current_addr)
                     self.visitedAddr.add(current_addr)
                     current_addr, current_inst, current_mnem, byte = self.getCur(jmpAddr)
                     continue
@@ -138,15 +131,15 @@ class Simplifier(object):
                 elif self.isJcc(current_inst):
                     print "Found a Jcc @%s" % (hex(current_addr))
                     self.buffer.append(self.formatLine(current_addr))
-                    jmpAddr = self.getJmpAddress(current_addr)
+                    jmpAddr = self.getBranchAddress(current_addr)
                     target.append(jmpAddr)
                 # if call, we will need the call address
                 elif self.isCall(current_inst):
                     print "Found a CALL @%s" % (hex(current_addr))
                     self.buffer.append(self.formatLine(current_addr))
-                    target.append(self.getCallAddress(current_addr))
+                    target.append(self.getBranchAddress(current_addr))
                 else:
-                    print "Nothing special: %s" % (current_inst.getInstructionString())
+                   #print "Nothing special: %s" % (current_inst.getInstructionString())
                     self.buffer.append(self.formatLine(current_addr))
 
                 if current_mnem.getInstructionString() in self.retn or current_addr in self.visitedAddr:
